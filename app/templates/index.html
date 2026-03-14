@@ -1,0 +1,561 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Streaming Chat</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, sans-serif;
+            background: #0f172a;
+            color: #e2e8f0;
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+
+        .container {
+            width: 100%;
+            max-width: 800px;
+            padding: 2rem 1.5rem;
+            display: flex;
+            flex-direction: column;
+            min-height: 100vh;
+        }
+
+        h1 {
+            font-size: 1.75rem;
+            font-weight: 700;
+            text-align: center;
+            margin-bottom: 0.5rem;
+            background: linear-gradient(135deg, #38bdf8, #818cf8);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .subtitle {
+            text-align: center;
+            color: #64748b;
+            font-size: 0.875rem;
+            margin-bottom: 2rem;
+        }
+
+        .response-area {
+            flex: 1;
+            background: #1e293b;
+            border: 1px solid #334155;
+            border-radius: 12px;
+            padding: 1.5rem;
+            margin-bottom: 1.5rem;
+            overflow-y: auto;
+            min-height: 300px;
+            max-height: 60vh;
+            line-height: 1.8;
+            font-size: 0.95rem;
+            word-wrap: break-word;
+            scroll-behavior: smooth;
+            position: relative;
+        }
+
+        .response-area.empty {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #475569;
+            font-style: italic;
+        }
+
+        /* The text content wrapper */
+        .response-text {
+            white-space: pre-wrap;
+            word-wrap: break-word;
+        }
+
+        /* Each streamed token fades + slides in */
+        .token {
+            display: inline;
+            animation: tokenFadeIn 0.3s ease-out forwards;
+        }
+
+        @keyframes tokenFadeIn {
+            from {
+                opacity: 0;
+                filter: blur(2px);
+            }
+            to {
+                opacity: 1;
+                filter: blur(0);
+            }
+        }
+
+        /* GPT-style blinking cursor */
+        .typing-cursor {
+            display: inline-block;
+            width: 7px;
+            height: 1.1em;
+            background: #818cf8;
+            border-radius: 1px;
+            margin-left: 2px;
+            vertical-align: text-bottom;
+            animation: cursorBlink 1s step-end infinite;
+        }
+
+        @keyframes cursorBlink {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0; }
+        }
+
+        .status-bar {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            margin-bottom: 1rem;
+            font-size: 0.8rem;
+            min-height: 1.5rem;
+        }
+
+        .status-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: #475569;
+            flex-shrink: 0;
+        }
+
+        .status-dot.pending {
+            background: #f59e0b;
+            animation: pulse 1.5s ease-in-out infinite;
+        }
+
+        .status-dot.streaming {
+            background: #22c55e;
+            animation: pulse 0.8s ease-in-out infinite;
+        }
+
+        .status-dot.done {
+            background: #22c55e;
+        }
+
+        .status-dot.error {
+            background: #ef4444;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.4; }
+        }
+
+        .status-text {
+            color: #94a3b8;
+        }
+
+        .input-area {
+            display: flex;
+            gap: 0.75rem;
+        }
+
+        textarea {
+            flex: 1;
+            background: #1e293b;
+            border: 1px solid #334155;
+            border-radius: 10px;
+            padding: 0.875rem 1rem;
+            color: #e2e8f0;
+            font-family: inherit;
+            font-size: 0.95rem;
+            resize: none;
+            outline: none;
+            transition: border-color 0.2s;
+            min-height: 52px;
+            max-height: 150px;
+        }
+
+        textarea:focus {
+            border-color: #818cf8;
+        }
+
+        textarea::placeholder {
+            color: #475569;
+        }
+
+        button {
+            background: linear-gradient(135deg, #6366f1, #818cf8);
+            color: white;
+            border: none;
+            border-radius: 10px;
+            padding: 0 1.5rem;
+            font-size: 0.95rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: opacity 0.2s, transform 0.1s;
+            white-space: nowrap;
+        }
+
+        button:hover {
+            opacity: 0.9;
+        }
+
+        button:active {
+            transform: scale(0.97);
+        }
+
+        button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+            transform: none;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>AI Streaming Chat</h1>
+        <p class="subtitle">Powered by FastAPI &bull; RabbitMQ &bull; Redis Streams &bull; Azure OpenAI</p>
+
+        <div class="status-bar">
+            <div class="status-dot" id="statusDot"></div>
+            <span class="status-text" id="statusText"></span>
+        </div>
+
+        <div class="response-area empty" id="responseArea">
+            Submit a prompt to get started...
+        </div>
+
+        <div class="input-area">
+            <textarea
+                id="promptInput"
+                placeholder="Type your prompt here..."
+                rows="1"
+            ></textarea>
+            <button id="submitBtn" onclick="submitPrompt()">Send</button>
+        </div>
+    </div>
+
+    <script>
+        const promptInput = document.getElementById('promptInput');
+        const submitBtn = document.getElementById('submitBtn');
+        const responseArea = document.getElementById('responseArea');
+        const statusDot = document.getElementById('statusDot');
+        const statusText = document.getElementById('statusText');
+
+        let eventSource = null;
+        let rawResponse = '';
+        let displayedLength = 0;
+        let textContainer = null;
+        let cursor = null;
+        let currentPromptId = null;
+        let lastEventId = null;
+
+        // ─── sessionStorage helpers ───
+        const STATE_KEY = 'stream_state';
+
+        function saveState() {
+            if (!currentPromptId) return;
+            sessionStorage.setItem(STATE_KEY, JSON.stringify({
+                promptId: currentPromptId,
+                lastEventId: lastEventId,
+                rawResponse: rawResponse,
+                displayedLength: displayedLength,
+            }));
+        }
+
+        function loadState() {
+            try {
+                const raw = sessionStorage.getItem(STATE_KEY);
+                return raw ? JSON.parse(raw) : null;
+            } catch { return null; }
+        }
+
+        function clearState() {
+            sessionStorage.removeItem(STATE_KEY);
+        }
+
+        // ─── cleanup ───
+        function cleanupStream() {
+            if (eventSource) {
+                eventSource.close();
+                eventSource = null;
+            }
+        }
+
+        // Save state before unload so we can resume
+        window.addEventListener('beforeunload', function () {
+            saveState();
+            cleanupStream();
+        });
+        window.addEventListener('pagehide', function () {
+            saveState();
+            cleanupStream();
+        });
+
+        // On every page show (load / bfcache restore) try to resume
+        window.addEventListener('pageshow', function () {
+            cleanupStream();
+
+            const saved = loadState();
+
+            if (saved && saved.promptId) {
+                // Restore previously received text
+                currentPromptId = saved.promptId;
+                lastEventId = saved.lastEventId;
+                rawResponse = saved.rawResponse || '';
+                displayedLength = saved.displayedLength || 0;
+
+                // Rebuild UI with text received so far
+                responseArea.classList.remove('empty');
+                responseArea.innerHTML = '';
+
+                textContainer = document.createElement('div');
+                textContainer.className = 'response-text';
+                responseArea.appendChild(textContainer);
+
+                // Render restored text without animation (instant)
+                const cleanText = stripMarkdown(rawResponse);
+                if (cleanText) {
+                    const span = document.createElement('span');
+                    span.className = 'token';
+                    span.style.animation = 'none';
+                    span.style.opacity = '1';
+                    span.textContent = cleanText;
+                    textContainer.appendChild(span);
+                }
+
+                setLoading(true);
+                setStatus('streaming', 'Resuming stream...');
+                appendCursor();
+
+                // Resume SSE from the last received entry ID
+                connectSSE(currentPromptId, lastEventId || '0-0');
+            } else {
+                // Fresh state — reset everything
+                rawResponse = '';
+                displayedLength = 0;
+                textContainer = null;
+                cursor = null;
+                currentPromptId = null;
+                lastEventId = null;
+
+                responseArea.classList.add('empty');
+                responseArea.innerHTML = 'Submit a prompt to get started...';
+                statusDot.className = 'status-dot';
+                statusText.textContent = '';
+                submitBtn.disabled = false;
+                submitBtn.textContent = 'Send';
+                promptInput.disabled = false;
+                promptInput.value = '';
+            }
+        });
+
+        // Strip markdown syntax to show clean plain text
+        function stripMarkdown(text) {
+            return text
+                .replace(/```[\s\S]*?```/g, function(m) {
+                    return m.replace(/```\w*\n?/g, '').trim();
+                })
+                .replace(/^#{1,6}\s+/gm, '')
+                .replace(/\*\*\*(.*?)\*\*\*/g, '$1')
+                .replace(/\*\*(.*?)\*\*/g, '$1')
+                .replace(/\*(.*?)\*/g, '$1')
+                .replace(/__(.*?)__/g, '$1')
+                .replace(/_(.*?)_/g, '$1')
+                .replace(/~~(.*?)~~/g, '$1')
+                .replace(/`([^`]+)`/g, '$1')
+                .replace(/^\s*[-*+]\s+/gm, '• ')
+                .replace(/^\s*\d+\.\s+/gm, function(m) { return m; })
+                .replace(/^>\s+/gm, '')
+                .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
+                .replace(/!\[([^\]]*)\]\([^)]+\)/g, '$1')
+                .replace(/^---+$/gm, '')
+                .replace(/\n{3,}/g, '\n\n');
+        }
+
+        // Auto-resize textarea
+        promptInput.addEventListener('input', function () {
+            this.style.height = 'auto';
+            this.style.height = Math.min(this.scrollHeight, 150) + 'px';
+        });
+
+        // Submit on Enter (Shift+Enter for newline)
+        promptInput.addEventListener('keydown', function (e) {
+            if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                submitPrompt();
+            }
+        });
+
+        function setStatus(state, text) {
+            statusDot.className = 'status-dot ' + state;
+            statusText.textContent = text;
+        }
+
+        function setLoading(loading) {
+            submitBtn.disabled = loading;
+            promptInput.disabled = loading;
+            submitBtn.textContent = loading ? 'Streaming...' : 'Send';
+        }
+
+        function createCursor() {
+            cursor = document.createElement('span');
+            cursor.className = 'typing-cursor';
+            return cursor;
+        }
+
+        function removeCursor() {
+            if (cursor && cursor.parentNode) {
+                cursor.remove();
+            }
+        }
+
+        function appendCursor() {
+            removeCursor();
+            if (textContainer) {
+                textContainer.appendChild(createCursor());
+            }
+        }
+
+        // Append new text as an animated span (GPT-like fade-in per token)
+        function appendToken(newText) {
+            if (!newText) return;
+
+            removeCursor();
+
+            const span = document.createElement('span');
+            span.className = 'token';
+            span.textContent = newText;
+            textContainer.appendChild(span);
+
+            appendCursor();
+
+            // Auto-scroll to bottom
+            responseArea.scrollTop = responseArea.scrollHeight;
+        }
+
+        // ─── Reusable SSE connection ───
+        function connectSSE(promptId, startId) {
+            const url = startId && startId !== '0-0'
+                ? `/api/stream/${promptId}?last_id=${encodeURIComponent(startId)}`
+                : `/api/stream/${promptId}`;
+
+            eventSource = new EventSource(url);
+
+            eventSource.addEventListener('token', function (e) {
+                setStatus('streaming', 'Streaming response...');
+
+                // Track the Redis Stream entry ID for resume
+                if (e.lastEventId) {
+                    lastEventId = e.lastEventId;
+                }
+
+                // Accumulate raw text and strip markdown
+                rawResponse += e.data;
+                const cleanText = stripMarkdown(rawResponse);
+
+                // Find only the newly added characters
+                const newChars = cleanText.substring(displayedLength);
+                displayedLength = cleanText.length;
+
+                if (newChars) {
+                    appendToken(newChars);
+                }
+
+                // Persist state after every token
+                saveState();
+            });
+
+            eventSource.addEventListener('done', function () {
+                removeCursor();
+                eventSource.close();
+                eventSource = null;
+                setStatus('done', 'Complete');
+                setLoading(false);
+                promptInput.focus();
+                clearState();
+            });
+
+            eventSource.addEventListener('error_event', function (e) {
+                removeCursor();
+                appendToken('\n\n[Error] ' + e.data);
+                removeCursor();
+                eventSource.close();
+                eventSource = null;
+                setStatus('error', 'Error occurred');
+                setLoading(false);
+                clearState();
+            });
+
+            eventSource.onerror = function () {
+                if (eventSource && eventSource.readyState === EventSource.CLOSED) {
+                    removeCursor();
+                    setStatus('error', 'Connection lost');
+                    setLoading(false);
+                }
+            };
+        }
+
+        async function submitPrompt() {
+            const text = promptInput.value.trim();
+            if (!text) return;
+
+            // Close any existing stream
+            cleanupStream();
+            clearState();
+
+            // Reset UI
+            responseArea.classList.remove('empty');
+            responseArea.innerHTML = '';
+            rawResponse = '';
+            displayedLength = 0;
+            lastEventId = null;
+
+            // Create text container
+            textContainer = document.createElement('div');
+            textContainer.className = 'response-text';
+            responseArea.appendChild(textContainer);
+
+            setLoading(true);
+            setStatus('pending', 'Submitting prompt...');
+
+            try {
+                // 1. POST the prompt
+                const res = await fetch('/api/prompt', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ prompt_text: text }),
+                });
+
+                if (!res.ok) {
+                    const err = await res.json();
+                    throw new Error(err.detail || 'Failed to submit prompt');
+                }
+
+                const data = await res.json();
+                currentPromptId = data.prompt_id;
+
+                setStatus('pending', `Prompt queued (${currentPromptId.slice(0, 8)}...) — waiting for worker...`);
+
+                // Show cursor while waiting
+                appendCursor();
+
+                // Save initial state so reload can pick it up
+                saveState();
+
+                // 2. Connect to SSE stream
+                connectSSE(currentPromptId, '0-0');
+
+            } catch (err) {
+                removeCursor();
+                responseArea.innerHTML = '<div class="response-text">Error: ' + err.message + '</div>';
+                setStatus('error', err.message);
+                setLoading(false);
+                clearState();
+            }
+        }
+    </script>
+</body>
+</html>
