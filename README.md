@@ -2,6 +2,12 @@
 
 A reliable AI streaming API built with **FastAPI**, **RabbitMQ**, **Redis Streams**, **MySQL**, and **Azure OpenAI**. Submit prompts to be processed asynchronously and stream responses token-by-token via Server-Sent Events (SSE).
 
+## 📖 Detailed Write-up
+
+I’ve written a detailed blog explaining the architecture, design decisions, and implementation of this project:
+
+🔗 Read here: [Medium Blog – Project Explanation](https://medium.com/@turenchotara7/list/reading-list)
+
 ## Architecture
 
 ```
